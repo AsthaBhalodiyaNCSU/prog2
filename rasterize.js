@@ -70,28 +70,46 @@ function setupWebGL() {
 
 // read triangles in, load them into webgl buffers
 function loadTriangles() {
-    var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL,"triangles");
+    var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
     if (inputTriangles != String.null) { 
-        var whichSetVert; // index of vertex in current triangle set
-        var whichSetTri; // index of triangle in current triangle set
-        var coordArray = []; // 1D array of vertex coords for WebGL
-        
-        for (var whichSet=0; whichSet<inputTriangles.length; whichSet++) {
-            
-            // set up the vertex coord array
-            for (whichSetVert=0; whichSetVert<inputTriangles[whichSet].vertices.length; whichSetVert++){
-                coordArray = coordArray.concat(inputTriangles[whichSet].vertices[whichSetVert]);
-                // console.log(inputTriangles[whichSet].vertices[whichSetVert]);
+        var coordArray = [];   // flat array of vertex coordinates
+        var indexArray = [];   // flat array of triangle indices
+        var indexOffset = 0;   // offset for indices as we move between sets
+
+        // loop over each triangle set in the JSON
+        for (var whichSet = 0; whichSet < inputTriangles.length; whichSet++) {
+            var vertices = inputTriangles[whichSet].vertices;
+            var triangles = inputTriangles[whichSet].triangles;
+
+            // add vertices to coordArray
+            for (var v = 0; v < vertices.length; v++) {
+                coordArray = coordArray.concat(vertices[v]);
             }
-        } // end for each triangle set 
-        // console.log(coordArray.length);
-        // send the vertex coords to webGL
-        vertexBuffer = gl.createBuffer(); // init empty vertex coord buffer
-        gl.bindBuffer(gl.ARRAY_BUFFER,vertexBuffer); // activate that buffer
-        gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(coordArray),gl.STATIC_DRAW); // coords to that buffer
-        
-    } // end if triangles found
-} // end load triangles
+
+            // add indices (adjusted by offset)
+            for (var t = 0; t < triangles.length; t++) {
+                indexArray.push(triangles[t][0] + indexOffset,
+                                triangles[t][1] + indexOffset,
+                                triangles[t][2] + indexOffset);
+            }
+
+            indexOffset += vertices.length; // move offset for next set
+        }
+
+        // send vertex coordinates to WebGL
+        vertexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coordArray), gl.STATIC_DRAW);
+
+        // send triangle indices to WebGL
+        triangleBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexArray), gl.STATIC_DRAW);
+
+        // store number of indices
+        triBufferSize = indexArray.length;
+    } 
+} // end loadTriangles
 
 // setup the webGL shaders
 function setupShaders() {
@@ -153,14 +171,16 @@ function setupShaders() {
 
 // render the loaded model
 function renderTriangles() {
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); // clear frame/depth buffers
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); // clear frame and depth buffers
     
-    // vertex buffer: activate and feed into vertex shader
-    gl.bindBuffer(gl.ARRAY_BUFFER,vertexBuffer); // activate
-    gl.vertexAttribPointer(vertexPositionAttrib,3,gl.FLOAT,false,0,0); // feed
+    // bind vertex buffer → vertex shader
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.vertexAttribPointer(vertexPositionAttrib, 3, gl.FLOAT, false, 0, 0);
 
-    gl.drawArrays(gl.TRIANGLES,0,3); // render
-} // end render triangles
+    // bind index buffer → draw all triangles
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffer);
+    gl.drawElements(gl.TRIANGLES, triBufferSize, gl.UNSIGNED_SHORT, 0);
+} // end renderTriangles
 
 
 /* MAIN -- HERE is where execution begins after window load */
