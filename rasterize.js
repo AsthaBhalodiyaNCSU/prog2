@@ -14,7 +14,8 @@ var vertexBuffer; // this contains vertex coordinates in triples
 var triangleBuffer; // this contains indices into vertexBuffer in triples
 var triBufferSize; // the number of indices in the triangle buffer
 var vertexPositionAttrib; // where to put position for vertex shader
-
+var vertexColorBuffer;   // buffer for vertex colors
+var vertexColorAttrib;   // attribute location for colors
 
 // ASSIGNMENT HELPER FUNCTIONS
 
@@ -72,115 +73,124 @@ function setupWebGL() {
 function loadTriangles() {
     var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
     if (inputTriangles != String.null) { 
-        var coordArray = [];   // flat array of vertex coordinates
-        var indexArray = [];   // flat array of triangle indices
-        var indexOffset = 0;   // offset for indices as we move between sets
+        var coordArray = [];   
+        var indexArray = [];   
+        var colorArray = [];   // store vertex colors
+        var indexOffset = 0;   
 
-        // loop over each triangle set in the JSON
         for (var whichSet = 0; whichSet < inputTriangles.length; whichSet++) {
             var vertices = inputTriangles[whichSet].vertices;
             var triangles = inputTriangles[whichSet].triangles;
+            var diffuse = inputTriangles[whichSet].material.diffuse; // [r,g,b]
 
-            // add vertices to coordArray
+            // add vertices + colors
             for (var v = 0; v < vertices.length; v++) {
                 coordArray = coordArray.concat(vertices[v]);
+                colorArray = colorArray.concat(diffuse); // same color per set
             }
 
-            // add indices (adjusted by offset)
+            // add indices
             for (var t = 0; t < triangles.length; t++) {
                 indexArray.push(triangles[t][0] + indexOffset,
                                 triangles[t][1] + indexOffset,
                                 triangles[t][2] + indexOffset);
             }
 
-            indexOffset += vertices.length; // move offset for next set
+            indexOffset += vertices.length;
         }
 
-        // send vertex coordinates to WebGL
+        // vertex positions
         vertexBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coordArray), gl.STATIC_DRAW);
 
-        // send triangle indices to WebGL
+        // vertex colors
+        vertexColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colorArray), gl.STATIC_DRAW);
+
+        // triangle indices
         triangleBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffer);
         gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexArray), gl.STATIC_DRAW);
 
-        // store number of indices
         triBufferSize = indexArray.length;
     } 
-} // end loadTriangles
+}
 
 // setup the webGL shaders
 function setupShaders() {
-    
-    // define fragment shader in essl using es6 template strings
+    // fragment shader
     var fShaderCode = `
+        precision mediump float;
+        varying vec3 fragColor;
         void main(void) {
-            gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0); // all fragments are white
+            gl_FragColor = vec4(fragColor, 1.0);
         }
     `;
-    
-    // define vertex shader in essl using es6 template strings
+
+    // vertex shader
     var vShaderCode = `
         attribute vec3 vertexPosition;
-
+        attribute vec3 vertexColor;
+        varying vec3 fragColor;
         void main(void) {
-            gl_Position = vec4(vertexPosition, 1.0); // use the untransformed position
+            gl_Position = vec4(vertexPosition, 1.0);
+            fragColor = vertexColor;
         }
     `;
     
     try {
-        // console.log("fragment shader: "+fShaderCode);
-        var fShader = gl.createShader(gl.FRAGMENT_SHADER); // create frag shader
-        gl.shaderSource(fShader,fShaderCode); // attach code to shader
-        gl.compileShader(fShader); // compile the code for gpu execution
+        var fShader = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fShader, fShaderCode);
+        gl.compileShader(fShader);
 
-        // console.log("vertex shader: "+vShaderCode);
-        var vShader = gl.createShader(gl.VERTEX_SHADER); // create vertex shader
-        gl.shaderSource(vShader,vShaderCode); // attach code to shader
-        gl.compileShader(vShader); // compile the code for gpu execution
+        var vShader = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vShader, vShaderCode);
+        gl.compileShader(vShader);
             
-        if (!gl.getShaderParameter(fShader, gl.COMPILE_STATUS)) { // bad frag shader compile
-            throw "error during fragment shader compile: " + gl.getShaderInfoLog(fShader);  
-            gl.deleteShader(fShader);
-        } else if (!gl.getShaderParameter(vShader, gl.COMPILE_STATUS)) { // bad vertex shader compile
-            throw "error during vertex shader compile: " + gl.getShaderInfoLog(vShader);  
-            gl.deleteShader(vShader);
-        } else { // no compile errors
-            var shaderProgram = gl.createProgram(); // create the single shader program
-            gl.attachShader(shaderProgram, fShader); // put frag shader in program
-            gl.attachShader(shaderProgram, vShader); // put vertex shader in program
-            gl.linkProgram(shaderProgram); // link program into gl context
+        if (!gl.getShaderParameter(fShader, gl.COMPILE_STATUS)) { 
+            throw "Fragment shader compile error: " + gl.getShaderInfoLog(fShader);  
+        } else if (!gl.getShaderParameter(vShader, gl.COMPILE_STATUS)) { 
+            throw "Vertex shader compile error: " + gl.getShaderInfoLog(vShader);  
+        } else {
+            var shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, fShader);
+            gl.attachShader(shaderProgram, vShader);
+            gl.linkProgram(shaderProgram);
 
-            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) { // bad program link
-                throw "error during shader program linking: " + gl.getProgramInfoLog(shaderProgram);
-            } else { // no shader program link errors
-                gl.useProgram(shaderProgram); // activate shader program (frag and vert)
-                vertexPositionAttrib = // get pointer to vertex shader input
-                    gl.getAttribLocation(shaderProgram, "vertexPosition"); 
-                gl.enableVertexAttribArray(vertexPositionAttrib); // input to shader from array
-            } // end if no shader program link errors
-        } // end if no compile errors
-    } // end try 
-    
-    catch(e) {
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                throw "Shader program link error: " + gl.getProgramInfoLog(shaderProgram);
+            } else {
+                gl.useProgram(shaderProgram);
+                vertexPositionAttrib = gl.getAttribLocation(shaderProgram, "vertexPosition"); 
+                gl.enableVertexAttribArray(vertexPositionAttrib);
+
+                vertexColorAttrib = gl.getAttribLocation(shaderProgram, "vertexColor");
+                gl.enableVertexAttribArray(vertexColorAttrib);
+            }
+        }
+    } catch(e) {
         console.log(e);
-    } // end catch
-} // end setup shaders
+    }
+}
 
 // render the loaded model
 function renderTriangles() {
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); // clear frame and depth buffers
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     
-    // bind vertex buffer → vertex shader
+    // positions
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
     gl.vertexAttribPointer(vertexPositionAttrib, 3, gl.FLOAT, false, 0, 0);
 
-    // bind index buffer → draw all triangles
+    // colors
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexColorBuffer);
+    gl.vertexAttribPointer(vertexColorAttrib, 3, gl.FLOAT, false, 0, 0);
+
+    // draw
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffer);
     gl.drawElements(gl.TRIANGLES, triBufferSize, gl.UNSIGNED_SHORT, 0);
-} // end renderTriangles
+}
 
 
 /* MAIN -- HERE is where execution begins after window load */
